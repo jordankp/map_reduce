@@ -48,5 +48,6 @@ where `<task>` is the task to be executed by the server and `<threads>` is the n
 Currently, the task examples in the repo are:
 
 * **word_count**
+* **inverted_index**
 
 If you want to add your own tasks, you will have to modify the CMakeLists.txt in the **client_example** source directory and write your code for the shared library.
