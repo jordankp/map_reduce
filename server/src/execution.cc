@@ -10,57 +10,47 @@ void Master::interrupt()
   interrupted.store(true);
 }
 
+bool Master::handle_interrupt()
+{
+  if (interrupted.load() == true)
+  {
+    term_task();
+    print_interrupt();
+    return true;
+  }
+
+  return false;
+}
+
 ErrorCode Master::execute_task(const ClientFunctions &cl_funcs, const char *client_name, size_t num_threads)
 {
   init_task(cl_funcs, client_name, num_threads);
   print_task_begin();
   read_phase();
+
+  if (handle_interrupt())
+    return ErrorCode::TASK_INTERRUPTED;
+
   map_phase();
 
-  if (interrupted.load() == true)
-  {
-    // Fake reduce, so that workers can finish
-    fake_reduce();
-    term_task();
-    print_interrupt();
+  if (handle_interrupt())
     return ErrorCode::TASK_INTERRUPTED;
-  }
 
   shuffle_phase();
 
-  if (interrupted.load() == true)
-  {
-    // Fake reduce, so that workers can finish
-    fake_reduce();
-    term_task();
-    print_interrupt();
+  if (handle_interrupt())
     return ErrorCode::TASK_INTERRUPTED;
-  }
 
   reduce_phase();
 
-  if (interrupted.load() == true)
-  {
-    term_task();
-    print_interrupt();
+  if (handle_interrupt())
     return ErrorCode::TASK_INTERRUPTED;
-  }
 
   write_phase();
   print_task_finish();
   term_task();
 
   return ErrorCode::OK;
-}
-
-void Master::fake_reduce()
-{
-  reduce_inputs_iter = reduce_inputs.cend();
-  {
-    std::lock_guard<std::mutex> lock(event_worker_reduce_mutex);
-    current_worker_task = WorkerTask::REDUCE;
-  }
-  event_worker_reduce.notify_all();
 }
 
 void Master::init_task(const ClientFunctions &cl_funcs, const char *client_name, size_t num_threads)
@@ -92,6 +82,12 @@ void Master::init_task(const ClientFunctions &cl_funcs, const char *client_name,
 
 void Master::term_task()
 {
+  {
+    std::lock_guard<std::mutex> lock(event_worker_execute_mutex);
+    current_worker_task = WorkerTask::TERMINATE;
+  }
+  event_worker_execute.notify_all();
+
   for (auto& worker : workers)
     worker.join();
 
@@ -117,10 +113,10 @@ void Master::map_phase()
   map_inputs_index = 0;
   workers_done_count = 0;
   {
-    std::lock_guard<std::mutex> lock(event_worker_map_mutex);
+    std::lock_guard<std::mutex> lock(event_worker_execute_mutex);
     current_worker_task = WorkerTask::MAP;
   }
-  event_worker_map.notify_all();
+  event_worker_execute.notify_all();
 
   {
     std::unique_lock<std::mutex> lock(workers_done_mutex);
@@ -140,10 +136,10 @@ void Master::reduce_phase()
   reduce_inputs_iter = reduce_inputs.cbegin();
   workers_done_count = 0;
   {
-    std::lock_guard<std::mutex> lock(event_worker_reduce_mutex);
+    std::lock_guard<std::mutex> lock(event_worker_execute_mutex);
     current_worker_task = WorkerTask::REDUCE;
   }
-  event_worker_reduce.notify_all();
+  event_worker_execute.notify_all();
 
   {
     std::unique_lock<std::mutex> lock(workers_done_mutex);
@@ -159,16 +155,22 @@ void Master::write_phase()
 void Master::worker_routine()
 {
   {
-    std::unique_lock<std::mutex> lock(event_worker_map_mutex);
-    event_worker_map.wait(lock, [this] { return current_worker_task == WorkerTask::MAP; });
+    std::unique_lock<std::mutex> lock(event_worker_execute_mutex);
+    event_worker_execute.wait(lock, [this] { return current_worker_task == WorkerTask::MAP ||
+                                                current_worker_task == WorkerTask::TERMINATE; });
+    if (current_worker_task == WorkerTask::TERMINATE)
+      return;
   }
 
   worker_map();
   increase_done_count();
 
   {
-    std::unique_lock<std::mutex> lock(event_worker_reduce_mutex);
-    event_worker_reduce.wait(lock, [this] { return current_worker_task == WorkerTask::REDUCE; });
+    std::unique_lock<std::mutex> lock(event_worker_execute_mutex);
+    event_worker_execute.wait(lock, [this] { return current_worker_task == WorkerTask::REDUCE ||
+                                                   current_worker_task == WorkerTask::TERMINATE; });
+    if (current_worker_task == WorkerTask::TERMINATE)
+      return;
   }
 
   worker_reduce();

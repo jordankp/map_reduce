@@ -19,7 +19,7 @@ std::vector<std::pair<KeyIn, ValueIn>> read()
 
   for (size_t i = 0; i < NUM_FILES; ++i)
   {
-    std::string file_name = "/home/jordan/personal/map_reduce/client_example/word_count/data/doc" + std::to_string(i) + ".txt";
+    std::string file_name = std::string(INPUT_DIR) + "/doc" + std::to_string(i) + ".txt";
     char *doc_contents = nullptr;
 
     std::ifstream f_in(file_name);
@@ -39,7 +39,7 @@ std::vector<std::pair<KeyIn, ValueIn>> read()
 
 void write(const std::vector<std::pair<KeyOut, ValueOut>> &vec)
 {
-  std::ofstream f_out("/home/jordan/personal/map_reduce/client_example/word_count/output.txt");
+  std::ofstream f_out(std::string(OUTPUT_DIR) + "/output.txt");
 
   for (auto &pair : vec)
     f_out << pair.first << ":" << (size_t)(pair.second) << "\n";

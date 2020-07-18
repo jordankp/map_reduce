@@ -28,7 +28,6 @@ class Master
     bool is_active = false;
   };
   TaskInfo task_info;
-
   std::mutex task_info_mutex;
 
   using KeyIn = std::string;
@@ -70,15 +69,12 @@ class Master
   {
     MAP = 0,
     REDUCE,
-    REST
+    REST,
+    TERMINATE
   };
   WorkerTask current_worker_task = WorkerTask::REST;
-
-  std::condition_variable event_worker_map;
-  std::mutex event_worker_map_mutex;
-
-  std::condition_variable event_worker_reduce;
-  std::mutex event_worker_reduce_mutex;
+  std::condition_variable event_worker_execute;
+  std::mutex event_worker_execute_mutex;
 
 public:
 
@@ -102,12 +98,12 @@ private:
   void reduce_phase();
   void write_phase();
 
+  bool handle_interrupt();
+
   void worker_routine();
   void worker_map();
   void worker_reduce();
   void increase_done_count();
-
-  void fake_reduce();
 
   void print_task_begin();
   void print_task_finish();
